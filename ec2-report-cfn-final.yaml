@@ -1,0 +1,488 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Configure the AWS-SystemsManager-AutomationAdministrationRole to enable
+  use of AWS Systems Manager Multi-Account Multi-Region Automation execution.
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+            default: "Single Account"
+        Parameters:
+          - SingleAccount
+      - Label:
+            default: "Central Account"
+        Parameters:
+          - CentralAccount
+          - OrganizationID          
+      - Label:
+            default: "Target Account(s)"
+        Parameters:
+          - TargetAccount
+          - CentralS3Bucket
+          - OrganizationID
+          - CentralAccount
+          - AWSSystemsManagerAutomationAdministrationRoleName
+          - AWSSystemsManagerAutomationExecutionRoleName
+    ParameterLabels:
+      TargetAccount:
+        default: "Target AWS Account"
+      CentralS3Bucket:
+        default: "Central S3 Bucket"
+      OrganizationID:
+        default: "Organization ID"
+      AWSSystemsManagerAutomationAdministrationRoleName:
+        default: "AWS Systems Manager Automation Administration Role Name"
+      AWSSystemsManagerAutomationExecutionRoleName:
+        default: "AWS Systems Manager Automation Execution Role Name"
+      CentralAccount:
+        default: "Central Account ID"
+      SingleAccount:
+        default: "Local Account"
+Parameters:
+  SingleAccount:
+    Type: String
+    Description: Generate the report for a single account.
+    Default: false
+    AllowedValues:
+    - true
+    - false
+  TargetAccount:
+    Type: String
+    Description: Creating the necessary resources on the target account(s).
+    Default: false
+    AllowedValues:
+    - true
+    - false
+  OrganizationID:
+    Type: String
+    Description: AWS Organizations ID. This is used only when you plan to target all accounts within the specified AWS Organization.  
+    Default: o-1234567890
+    AllowedPattern: '^o-[a-z0-9]{10,32}$'
+  CentralAccount:
+    Type: String
+    Description: >-
+      AWS Account ID of the central account (the account from which AWS Systems Manager Automation will be initiated). 
+    Default: '123456789012'
+    MaxLength: 12
+    MinLength: 12
+  CentralS3Bucket:
+    Type: String
+    Description: >-
+      Required when TargetAccount parameter set to true. Generated after running this CloudFormation on the central account.
+  AWSSystemsManagerAutomationExecutionRoleName:
+    Type: String
+    Description: >-
+      Required when TargetAccount parameter set to true. Generated after running this CloudFormation on the central account.
+  AWSSystemsManagerAutomationAdministrationRoleName:
+    Type: String
+    Description: >-
+      Required when TargetAccount parameter set to true. Generated after running this CloudFormation on the central account.
+Conditions:
+  NotTargetAccount:
+    Fn::Equals:
+    - Ref: TargetAccount
+    - false
+  LocalAccount:
+    Fn::Equals:
+    - Ref: SingleAccount
+    - true
+  OrganizationIDExist: !Not 
+    - !Equals 
+      - !Ref OrganizationID
+      - o-1234567890
+  NotLocalAccountAndCentralAccount:
+    !And [!Equals [!Ref "SingleAccount", false], !Equals [!Ref "TargetAccount", false]]
+  LocalAccountOrCentralAccount:
+    !Or [!Equals [!Ref "SingleAccount", true], !Equals [!Ref "TargetAccount", false]]
+Resources:
+  AWSSystemsManagerAdministrationExecutionRole:
+    Condition: NotLocalAccountAndCentralAccount
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: 
+        !Sub
+          - 'AWS-SystemsManager-AutomationAdministrationRole-${RandomGUID}'
+          - { RandomGUID: !Select [0, !Split ["-", !Select [2, !Split ["/", !Ref AWS::StackId ]]]] }
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: ssm.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: "/"
+      Policies:
+      - PolicyName: AssumeRole-AWSSystemsManagerAutomationExecutionRole
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            Fn::If:
+            - OrganizationIDExist
+            - - Effect: Allow
+                Action:
+                - sts:AssumeRole
+                Resource:
+                  Fn::Sub: 
+                    - arn:${AWS::Partition}:iam::*:role/AWS-SystemsManager-AutomationExecutionRole-${RandomGUID}
+                    - { RandomGUID: !Select [0, !Split ["-", !Select [2, !Split ["/", !Ref AWS::StackId ]]]] }
+              - Effect: Allow
+                Action:
+                - organizations:ListAccountsForParent
+                Resource:
+                - "*"
+            - - Effect: Allow
+                Action:
+                - sts:AssumeRole
+                Resource:
+                  Fn::Sub:
+                    - arn:${AWS::Partition}:iam::*:role/AWS-SystemsManager-AutomationExecutionRole-${RandomGUID}
+                    - { RandomGUID: !Select [0, !Split ["-", !Select [2, !Split ["/", !Ref AWS::StackId ]]]] }
+  AWSSystemsManagerAutomationExecutionRole:
+      Type: 'AWS::IAM::Role'
+      Properties:
+        RoleName: !If [LocalAccountOrCentralAccount, !Sub ['AWS-SystemsManager-AutomationExecutionRole-${RandomGUID}', { RandomGUID: !Select [0, !Split ["-", !Select [2, !Split ["/", !Ref AWS::StackId ]]]] }],!Ref AWSSystemsManagerAutomationExecutionRoleName]
+        AssumeRolePolicyDocument:
+          Version: 2012-10-17
+          Statement:
+            - !If 
+              - LocalAccount
+              - !Ref "AWS::NoValue"       
+              - !If 
+                - OrganizationIDExist
+                - Effect: Allow
+                  Principal:
+                    AWS: !If [NotTargetAccount, !Sub ['arn:${AWS::Partition}:iam::${AWS::AccountId}:role/AWS-SystemsManager-AutomationAdministrationRole-${RandomGUID}', { RandomGUID: !Select [0, !Split ["-", !Select [2, !Split ["/", !Ref AWS::StackId ]]]] }],!Sub 'arn:${AWS::Partition}:iam::${CentralAccount}:role/${AWSSystemsManagerAutomationAdministrationRoleName}']
+                  Action: 'sts:AssumeRole'
+                  Condition:
+                    StringEquals:
+                      'aws:PrincipalOrgID': !Ref OrganizationID
+                - Effect: Allow
+                  Principal:
+                    AWS: !If [NotTargetAccount, !Sub ['arn:${AWS::Partition}:iam::${AWS::AccountId}:role/AWS-SystemsManager-AutomationAdministrationRole-${RandomGUID}', { RandomGUID: !Select [0, !Split ["-", !Select [2, !Split ["/", !Ref AWS::StackId ]]]] }],!Sub 'arn:${AWS::Partition}:iam::${CentralAccount}:role/${AWSSystemsManagerAutomationAdministrationRoleName}']
+                  Action: 'sts:AssumeRole'
+            - Effect: Allow
+              Principal:
+                Service: ssm.amazonaws.com
+              Action:
+                - 'sts:AssumeRole'
+        ManagedPolicyArns:
+          - 'arn:aws:iam::aws:policy/service-role/AmazonSSMAutomationRole'
+        Path: /
+        Policies:
+          - PolicyName: ExecutionPolicy
+            PolicyDocument:
+              Version: 2012-10-17
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - 'resource-groups:ListGroupResources'
+                    - 'tag:GetResources'
+                    - 'ec2:DescribeInstances'
+                  Resource: '*'
+                - Effect: Allow
+                  Action:
+                    - 'iam:PassRole'
+                  Resource: !If [LocalAccountOrCentralAccount, !Sub ['arn:${AWS::Partition}:iam::${AWS::AccountId}:role/AWS-SystemsManager-AutomationExecutionRole-${RandomGUID}', { RandomGUID: !Select [0, !Split ["-", !Select [2, !Split ["/", !Ref AWS::StackId ]]]] }],!Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${AWSSystemsManagerAutomationExecutionRoleName}']
+          - PolicyName: AWS-EC2-Billing-Ops-Report-Policy
+            PolicyDocument:
+              Version: 2012-10-17
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - 'ec2:DescribeInstances'
+                    - 'ec2:DescribeImages'
+                    - 'ec2:DescribeRegions'
+                  Resource: '*'
+                - Effect: Allow
+                  Action:
+                    - 's3:PutObject'
+                    - 's3:GetObject'
+                    - 's3:ListBucket'
+                    - 's3:PutObjectAcl'
+                  Resource:
+                    - !If [LocalAccountOrCentralAccount, !Sub ['arn:${AWS::Partition}:s3:::${S3bucketwithPrefix}', S3bucketwithPrefix: !Ref S3Bucket], !Sub 'arn:${AWS::Partition}:s3:::${CentralS3Bucket}']
+                    - !If [LocalAccountOrCentralAccount, !Sub ['arn:${AWS::Partition}:s3:::${S3bucketwithPrefix}/EC2Report-*', S3bucketwithPrefix: !Ref S3Bucket],!Sub 'arn:${AWS::Partition}:s3:::${CentralS3Bucket}/EC2Report-*']
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Condition: LocalAccountOrCentralAccount
+    Properties:
+      BucketName:
+        !Sub
+          - 'ec2report-${RandomGUID}'
+          - RandomGUID: !Select [2, !Split [/, !Ref AWS::StackId ]]
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+  BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Condition: NotLocalAccountAndCentralAccount
+    Properties:
+      Bucket: !Ref S3Bucket
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action:
+            - "s3:PutObject"
+            - "s3:GetObject"
+            - "s3:ListBucket"
+            - 's3:PutObjectAcl'
+            Effect: Allow
+            Resource: 
+              - !Sub
+                - 'arn:${AWS::Partition}:s3:::${S3bucketwithPrefix}/EC2Report-*'
+                - S3bucketwithPrefix: !Ref S3Bucket
+              - !Sub
+                - 'arn:${AWS::Partition}:s3:::${S3bucketwithPrefix}'
+                - S3bucketwithPrefix: !Ref S3Bucket
+            Principal: '*'
+            Condition:
+              StringLike:
+                "aws:PrincipalOrgID": [!Ref OrganizationID]
+  SystemsManagerAutomationDocument: 
+    Type: AWS::SSM::Document
+    Condition: LocalAccountOrCentralAccount
+    Properties:
+      DocumentFormat: YAML
+      DocumentType: Automation
+      Name:
+        !Sub
+          - 'EC2Report_generator_runbook-${RandomGUID}'
+          - { RandomGUID: !Select [0, !Split ["-", !Select [2, !Split ["/", !Ref AWS::StackId ]]]] }
+      Content:
+        description: Get instance usage info
+        schemaVersion: '0.3'
+        assumeRole: '{{AutomationAssumeRole}}'
+        parameters:
+          AutomationAssumeRole:
+            type: String
+            description: '(Required) The Amazon Resource Name (ARN) of the IAM role that allows Automation to perform the actions on your behalf. If no role is specified, Systems Manager Automation uses your IAM permissions to operate this runbook.'
+          S3BucketName:
+            type: String
+            description: (Required) The ID of the EC2 instance you want to tag.
+            default: !Ref S3Bucket
+        mainSteps:
+          - name: EC2Report
+            action: 'aws:executeScript'
+            inputs:
+              Runtime: python3.8
+              Handler: lambda_handler
+              InputPayload:
+                bucket_name: '{{S3BucketName}}'
+                CSV_PATH: /tmp/ec2.csv
+                AccountID: '{{global:ACCOUNT_ID}}'
+              Script: |-
+                import boto3
+                import csv
+                from datetime import date
+                import logging
+                import os
+                import botocore
+
+                # creating service clients
+                ec2 = boto3.client('ec2')
+                s3 = boto3.resource('s3')
+
+                # set logger
+                logger = logging.getLogger()
+                logger.setLevel(logging.INFO)
+
+                def lambda_handler(event, context):
+                    global S3BbucketName
+                    global csv_path
+                    global ACCOUNT_ID
+
+                    S3BbucketName = event['bucket_name']
+                    csv_path = event['CSV_PATH']
+                    ACCOUNT_ID = event['AccountID']
+
+                    logging.info(f"bucket_name: S3BbucketName, csv_path: csv_path")
+
+                    # Get all regions
+                    regions = get_regions()
+                    logging.info(regions)
+
+                    # descirbe EC2 instances
+                    allinstances = []
+                    for region in regions:
+                        instancesperregion = get_ec2_instances(region['RegionName'])
+                        allinstances = allinstances + instancesperregion
+                    logging.info(allinstances)
+
+                    # write the ec2 instance list to a csv file
+                    generate_csv(allinstances, csv_path)
+                    f = open(csv_path, "r")
+                    logging.info(f.read())
+
+                    # generate an s3 object name
+                    s3_object_name = generage_object_name()
+
+                    # check the s3 object
+                    csv_status = check_s3_object(S3BbucketName, s3_object_name)
+                    
+                    if csv_status:
+                        # Merge CSVs
+                        merge_csv(S3BbucketName, s3_object_name, csv_path)
+                    else:
+                        # create an s3 object
+                        upload_s3(S3BbucketName, s3_object_name, csv_path)
+
+                    # delete the csv file following the successful upload
+                    os.remove(csv_path)
+
+                    return {
+                        "s3_bucket": S3BbucketName,
+                        "s3_object": s3_object_name,
+                        "status": "success"
+                    }
+
+                # TODO: 
+                # handle next tokens
+                def get_regions() -> list:
+                    """Return a list
+
+                    Get a list of regions
+                    """
+                    logging.info("describing regions")
+                    try:
+                        response = ec2.describe_regions()
+                    except Exception as err:
+                        logging.error(f"Unexpected {err=}, {type(err)=}")
+                        raise
+                    
+                    regions = response['Regions']
+                    return regions
+
+                def get_ec2_instances(region) -> list:
+                    """Return a list
+
+                    Get a list of EC2 instances and their return instance id, platform details, usage operation, usage operation update time, availability zone, and tags
+                    """
+                    logging.info("describing EC2 instances")
+                    ec2region = boto3.client('ec2',region_name=region)
+                    try:
+                        response = ec2region.describe_instances()
+                    except Exception as err:
+                        logging.error(f"Unexpected {err=}, {type(err)=}")
+                        raise
+                    instances = []
+                    for r in response['Reservations']:
+                        for i in r['Instances']:
+                            if 'Tags' in i:
+                                for b in i['Tags']:
+                                    if b['Key'] == 'Name':
+                                        Name = b['Value']
+                                    else:
+                                        Name = ''
+                            else:
+                                Name = ''
+                            if 'HostId' in i['Placement']:
+                                HostId = i['Placement']['HostId']
+                            else:
+                                HostId = ''
+                            AMIresponse = ec2region.describe_images(ImageIds=[i['ImageId']])
+                            if AMIresponse['Images'] == []:
+                                AMIOwnerID = 'NA'
+                                AMIOwnerAlias = 'NA'
+                            else:
+                                AMIOwnerID = AMIresponse['Images'][0]['OwnerId']
+                                if 'ImageOwnerAlias' in AMIresponse['Images'][0]:
+                                    AMIOwnerAlias = AMIresponse['Images'][0]['ImageOwnerAlias']
+                                else:
+                                    AMIOwnerAlias = 'NA'
+                            instance = [ACCOUNT_ID, i['InstanceId'], str(Name), str(HostId), i['ImageId'], str(AMIOwnerID), str(AMIOwnerAlias), i['InstanceType'], i['CpuOptions']['CoreCount'], i['CpuOptions']['ThreadsPerCore'], i['PlatformDetails'], i['UsageOperation'], str(i['UsageOperationUpdateTime']), i['Placement']['AvailabilityZone']]
+                            instances.append(instance)
+                    return instances
+
+                def generate_csv(instance_list, file_path):
+                    """Create a csv file
+
+                    Take the instance list and write it to a csv file
+                    """
+                    # field names for a csv file
+                    fields = ['AccountID', 'InstanceId', 'Name', 'DedicatedHostID', 'AMIID', 'AMIOwnerID', 'AMIOwnerAlias', 'InstanceType', 'CoreCount', 'ThreadsPerCore', 'PlatformDetails', 'UsageOperation', 'UsageOperationUpdateTime', 'AvailabilityZone']
+                    with open(file_path, 'w', newline='', encoding='utf-8') as output_file:
+                        # creating a csv writer object and write rows
+                        try:
+                            csvwriter = csv.writer(output_file, delimiter=',', )
+                            csvwriter.writerow(fields)
+                            csvwriter.writerows(instance_list)
+                        except Exception as err:
+                            logging.error(f"Unexpected {err=}, {type(err)=}")
+                            raise
+
+                def generage_object_name() -> str:
+                    """Generate an object name
+                    """
+                    today = date.today()
+                    return f"EC2Report-{today}.csv"
+                    """return f"EC2Report-{today}.csv"
+                    """
+
+                def check_s3_object(S3BbucketName, object_key):
+                    """ Check whether the CSV file is already exist or not
+                    """
+                    try:
+                        s3.Object(S3BbucketName, object_key).load()
+                    except botocore.exceptions.ClientError as e:
+                        if e.response['Error']['Code'] == "404":
+                            # The object does not exist.
+                            return False
+                        else:
+                            # Something else has gone wrong.
+                            raise
+                    else:
+                        # The object does exist.
+                        return True
+
+                def merge_csv(S3BbucketName, object_key, file_path):
+                    downloaded_file_path = '/tmp/ec2fromS3.csv'
+                    merge_file_path = '/tmp/ec2merge.csv'
+                    logging.info(f"downloading {object_key} from {S3BbucketName}")
+                    
+                    # Downloaded existing file:
+                    s3.meta.client.download_file(S3BbucketName, object_key, downloaded_file_path)
+                    
+                    with open(merge_file_path, "w") as fout:
+                        # first file:
+                        with open(downloaded_file_path, "r") as f:
+                            fout.writelines(f)
+                            with open(file_path, "r") as f:
+                                next(f) # skip the header, portably
+                                fout.writelines(f)
+                    
+                    upload_s3(S3BbucketName, object_key, merge_file_path)
+
+                def upload_s3(S3BbucketName, object_key, file_path):
+                    """Create an object in an S3 bucket
+
+                    Take the instance list and write it to a csv file
+                    """
+                    logging.info(f"uploading {object_key} to {S3BbucketName}")
+                    try:
+                        s3.meta.client.upload_file(
+                            Filename=file_path,
+                            Bucket=S3BbucketName,
+                            Key=object_key,
+                            ExtraArgs={'ACL': 'bucket-owner-full-control'}
+                        )
+                    except Exception as err:
+                        logging.error(f"Unexpected {err=}, {type(err)=}")
+                        raise
+Outputs:
+  S3Bucket:
+    Condition: LocalAccountOrCentralAccount
+    Description: S3 bucket to store the output.
+    Value: !Ref S3Bucket
+  AWSSystemsManagerAdministrationExecutionRole:
+    Condition: NotLocalAccountAndCentralAccount
+    Description: AWS SystemsManager Administration Execution Role
+    Value: !Ref AWSSystemsManagerAdministrationExecutionRole
+  AWSSystemsManagerAutomationExecutionRole:
+    Condition: LocalAccountOrCentralAccount
+    Description: AWS Systems Manager Automation Execution Role
+    Value: !Ref AWSSystemsManagerAutomationExecutionRole
+  SystemsManagerAutomationDocument:
+    Condition: LocalAccountOrCentralAccount
+    Description: Systems Manager Automation Document to generate the report.
+    Value: !Ref SystemsManagerAutomationDocument
