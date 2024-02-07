@@ -1,3 +1,13 @@
+https://docs.aws.amazon.com/prescriptive-guidance/latest/migration-factory-cloudendure/workflow.html
+https://repost.aws/knowledge-center/mgn-windows-fix-replication-lag
+https://aws.amazon.com/blogs/mt/aws-application-migration-service-best-practices/
+https://repost.aws/knowledge-center/mgn-replication-process-stuck
+https://docs.cloudendure.com/#Home.htm%3FTocPath%3DNavigation%7C_____1
+https://cloudreach.com/en/technical-blog/tips-tricks-for-lift-shift-migrations-aws/
+https://docs.aws.amazon.com/AWSEC2/latest/WindowsGuide/ebs-using-volumes.html
+https://support.purestorage.com/Pure_Cloud_Block_Store/VMware_VM_Migratation_to_AWS_with_Cloud_Block_Store_and_AWS_Application_Migration_Services
+
+
 $module = Get-Module Microsoft.PowerShell.Utility
 $module.LogPipelineExecutionDetails = $false
 $Snapin = Get-PSSnapin Microsoft.PowerShell.Core
